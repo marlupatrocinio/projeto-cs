@@ -46,8 +46,8 @@ import requests
 from google.cloud import bigquery
 import os
 
-INPUT_PATH = '/path/para/seu/csv/compras.csv'
-BQ_TABLE = 'seu_projeto.seu_dataset.sua_tabela'
+INPUT_PATH = '' #ainda tenho que colocar a origem do bucket
+BQ_TABLE = '' #verificar qual é o dataset no BQ
 
 
 def read_csv():
@@ -116,7 +116,7 @@ def build_dag():
     with DAG(
         dag_id='csgo_compras_transformations',
         schedule_interval='@once',
-        start_date=datetime(2024, 1, 1),
+        start_date=datetime(2025, 1, 1),
         catchup=False,
         tags=['csgo', 'buff']
     ) as dag:
