@@ -23,8 +23,8 @@ def transform_data():
     df['id_transaction'] = df.index + 1
 
     wear = ['Battle-Scarred', 'Factory New', 'Minimal Wear', 'Field-Tested', 'Well-Worn']
-    regex_pattern = f"({'|'.join(wear)})"
-    df['wear'] = df['Items'].str.extract(regex_pattern, expand=False)
+    join_wear = f"({'|'.join(wear)})"
+    df['wear'] = df['Items'].str.extract(join_wear, expand=False)
 
     df = df.rename(columns={'Time(GMT+8)': 'Time'})
     df['store_link'] = df['Items'].str.extract(r'HYPERLINK\("([^"]+)"')
@@ -39,7 +39,7 @@ def transform_data():
     df = df.drop('Time', axis=1)
 
 
-def fetch_exchange_rate():
+def cny_to_usd():
     global df
     def get_usd_rate(date_str):
         url = f"https://api.frankfurter.app/{date_str}?from=CNY&to=USD"
@@ -92,8 +92,8 @@ def build_dag():
         )
 
         t3 = PythonOperator(
-            task_id='fetch_exchange_rate',
-            python_callable=fetch_exchange_rate
+            task_id='cny_to_usd',
+            python_callable=cny_to_usd
         )
 
         t4 = PythonOperator(
