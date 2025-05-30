@@ -4,19 +4,28 @@ from datetime import datetime
 import pandas as pd
 import requests
 from google.cloud import bigquery
+from google.cloud import storage
 import os
+from io import StringIO
 
-INPUT_PATH = '' #ainda tenho que colocar a origem do bucket
-BQ_TABLE = '' #verificar qual é o dataset no BQ
-
+bucket_gcp = 'projeto_cs_buff'
+csv_compras = 'compras.csv'
+temp1 = '/temporarios/df1.csv'
+temp2 = '/temporarios/df2.csv'
+temp3 = '/temporarios/df3.csv'
+bigquery_table = 'proud-outpost-455911-s8.projeto_cs_buff.compras_final'
 
 def read_csv():
-    global df
-    df = pd.read_csv(INPUT_PATH)
+    client = storage.Client()
+    bucket = client.bucket(bucket_gcp)
+    blob = bucket.blob(csv_compras)
+    data = blob.download_as_text()
+    df = pd.read_csv(StringIO(data))
+    df.to_csv(temp1, index=False)
 
 
 def transform_data():
-    global df
+    df = pd.read_csv(temp1)
     df['Time(GMT+8)'] = pd.to_datetime(df['Time(GMT+8)'])
     df = df.sort_values(by='Time(GMT+8)', ascending=True)
     df = df.reset_index(drop=True)
@@ -37,10 +46,14 @@ def transform_data():
     df['Timestamp_GMT8'] = pd.to_datetime(df['Time'])
     df['Transaction_Date'] = df['Time'].dt.date
     df = df.drop('Time', axis=1)
+    
+    df.to_csv(temp2, index=False)
 
 
 def cny_to_usd():
-    global df
+    
+    df = pd.read_csv(temp2)
+    
     def get_usd_rate(date_str):
         url = f"https://api.frankfurter.app/{date_str}?from=CNY&to=USD"
         response = requests.get(url)
@@ -50,60 +63,51 @@ def cny_to_usd():
 
     df['Rate'] = df['Transaction_Date'].astype(str).apply(get_usd_rate)
     df['Price_USD'] = df['Price_CNY'] * df['Rate']
+    
+    df.to_csv(temp3, index=False)
 
 
 def load_to_bigquery():
     client = bigquery.Client()
-    job_config = bigquery.LoadJobConfig(
-        write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
-        autodetect=True,
-        source_format=bigquery.SourceFormat.CSV,
-        skip_leading_rows=1,
-    )
-    temp_path = '/tmp/transformed_compras.csv'
-    df.to_csv(temp_path, index=False)
-
-    with open(temp_path, "rb") as source_file:
-        job = client.load_table_from_file(
-            source_file,
-            BQ_TABLE,
-            job_config=job_config
+    df = pd.read_csv(temp3)
+    
+    job = client.load_table_from_dataframe(
+        df,
+        bigquery_table,
+        job_config=bigquery.LoadJobConfig(
+            write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
+            autodetect=True
         )
+    )
     job.result()
 
 
-def build_dag():
-    with DAG(
-        dag_id='csgo_compras_transformations',
-        schedule_interval='@once',
-        start_date=datetime(2025, 1, 1),
-        catchup=False,
-        tags=['csgo', 'buff']
-    ) as dag:
+dag = DAG(
+    dag_id='csgo_compras_transformations',
+    schedule_interval='@once',
+    start_date=datetime(2025, 1, 1),
+    catchup=False,
+    tags=['csgo', 'buff']
+)
 
-        t1 = PythonOperator(
-            task_id='read_csv',
-            python_callable=read_csv
-        )
+t1 = PythonOperator(
+    task_id='read_csv',
+    python_callable=read_csv
+)
 
-        t2 = PythonOperator(
-            task_id='transform_data',
-            python_callable=transform_data
-        )
+t2 = PythonOperator(
+    task_id='transform_data',
+    python_callable=transform_data
+)
 
-        t3 = PythonOperator(
-            task_id='cny_to_usd',
-            python_callable=cny_to_usd
-        )
+t3 = PythonOperator(
+    task_id='cny_to_usd',
+    python_callable=cny_to_usd
+)
 
-        t4 = PythonOperator(
-            task_id='load_to_bigquery',
-            python_callable=load_to_bigquery
-        )
+t4 = PythonOperator(
+    task_id='load_to_bigquery',
+    python_callable=load_to_bigquery
+)
 
-        t1 >> t2 >> t3 >> t4
-
-    return dag
-
-
-globals()['csgo_compras_transformations'] = build_dag()
+t1 >> t2 >> t3 >> t4
